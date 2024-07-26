@@ -207,7 +207,7 @@ client.on('messageCreate', async message => {
         const embed = new EmbedBuilder()
             .setTitle(`Temps travaillé pour ${displayName}`)
             .setDescription(`${displayName} a travaillé un total de ${totalTime} durant les ${numberOfDays} derniers jours.`)
-            .setColor(0x00FF00);
+            .setColor(0x00b3ff);
 
         await message.reply({ embeds: [embed] });
 
