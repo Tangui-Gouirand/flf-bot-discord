@@ -12,35 +12,28 @@ const userMessageIds = {}; // Pour stocker les messages avec les boutons
 async function createExcelFileIfNotExists() {
     try {
         if (!fs.existsSync(excelFilePath)) {
+            console.log(`Le fichier Excel n'existe pas. Création de ${excelFilePath}`);
             const workbook = new ExcelJS.Workbook();
             await workbook.xlsx.writeFile(excelFilePath);
-            console.log('Fichier Excel créé.');
+            console.log(`Fichier Excel créé à l'emplacement : ${excelFilePath}`);
+        } else {
+            console.log(`Le fichier Excel existe déjà à l'emplacement : ${excelFilePath}`);
         }
     } catch (error) {
         console.error('Erreur lors de la création du fichier Excel:', error);
     }
 }
+
 // Assurez-vous que le fichier Excel existe lorsque le bot démarre
 client.once('ready', async () => {
     await createExcelFileIfNotExists();
     console.log('Bot prêt!');
 });
 
-// Fonction pour gérer les erreurs
-async function handleError(error, interaction) {
-    console.error('Erreur:', error);
-    await interaction.reply({ content: 'Une erreur est survenue, veuillez réessayer plus tard.', ephemeral: true });
-}
-
-// Fonction pour valider les dates
-function isValidDate(dateStr) {
-    const date = new Date(dateStr);
-    return !isNaN(date.getTime());
-}
-
 // Fonction pour obtenir le statut de l'utilisateur
 async function getUserStatus(displayName) {
     try {
+        console.log(`Lecture du fichier Excel à l'emplacement : ${excelFilePath}`);
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(excelFilePath);
         const sheet = workbook.getWorksheet(displayName);
@@ -61,6 +54,7 @@ async function getUserStatus(displayName) {
 // Fonction pour obtenir l'historique des services
 async function getServiceHistory(displayName) {
     try {
+        console.log(`Lecture du fichier Excel à l'emplacement : ${excelFilePath}`);
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(excelFilePath);
         const sheet = workbook.getWorksheet(displayName);
@@ -206,7 +200,7 @@ client.on('messageCreate', async message => {
         const embed = new EmbedBuilder()
             .setTitle(`Temps travaillé pour ${displayName}`)
             .setDescription(`${displayName} a travaillé un total de ${totalTime} durant les ${numberOfDays} derniers jours.`)
-            .setColor(0x00b3ff);
+            .setColor(0x00FF00);
 
         await message.reply({ embeds: [embed] });
 
@@ -253,6 +247,7 @@ client.on('interactionCreate', async interaction => {
             const timestamp = new Date();
 
             // Enregistrer les données dans le fichier Excel
+            console.log(`Écriture dans le fichier Excel à l'emplacement : ${excelFilePath}`);
             const workbook = new ExcelJS.Workbook();
             await workbook.xlsx.readFile(excelFilePath);
             let sheet = workbook.getWorksheet(displayName);
@@ -260,10 +255,12 @@ client.on('interactionCreate', async interaction => {
             if (!sheet) {
                 sheet = workbook.addWorksheet(displayName);
                 sheet.addRow(['Timestamp', 'Status']);
+                console.log(`Nouvelle feuille créée pour ${displayName}`);
             }
 
             sheet.addRow([timestamp.toISOString(), status]);
             await workbook.xlsx.writeFile(excelFilePath);
+            console.log(`Données enregistrées pour ${displayName} à ${timestamp.toISOString()}`);
 
             // Créer un embed avec la couleur appropriée
             const embed = createServiceEmbed(displayName, status, timestamp);
@@ -290,13 +287,15 @@ client.on('interactionCreate', async interaction => {
             // Gérer les sélections d'utilisateurs si nécessaire
         }
     } catch (error) {
-        await handleError(error, interaction);
+        console.error('Erreur lors de l\'interaction :', error);
+        await interaction.reply('Une erreur est survenue.');
     }
 });
 
 // Fonction pour obtenir le temps total travaillé pour un utilisateur sur une journée
 async function getTotalTimeWorked(displayName, date) {
     try {
+        console.log(`Lecture du fichier Excel à l'emplacement : ${excelFilePath}`);
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(excelFilePath);
         const sheet = workbook.getWorksheet(displayName);
@@ -330,6 +329,7 @@ async function getTotalTimeWorked(displayName, date) {
 // Fonction pour obtenir le temps total travaillé dans une plage de dates
 async function getTotalTimeWorkedInRange(displayName, startDate, endDate) {
     try {
+        console.log(`Lecture du fichier Excel à l'emplacement : ${excelFilePath}`);
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(excelFilePath);
         const sheet = workbook.getWorksheet(displayName);
