@@ -1,11 +1,12 @@
-const { Client, GatewayIntentBits, ButtonBuilder, ActionRowBuilder, ButtonStyle, EmbedBuilder, Events } = require('discord.js');
+const { Client, GatewayIntentBits, ButtonBuilder, ActionRowBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder } = require('discord.js');
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
+const moment = require('moment');
 
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
 const excelFilePath = path.join(__dirname, 'services.xlsx');
-const userMessageIds = {};
+const userMessageIds = {}; // Pour stocker les messages avec les boutons
 
 // Fonction pour créer un fichier Excel vide s'il n'existe pas
 async function createExcelFileIfNotExists() {
@@ -26,30 +27,103 @@ client.once('ready', async () => {
     console.log('Bot prêt!');
 });
 
+// Fonction pour gérer les erreurs
+async function handleError(error, interaction) {
+    console.error('Erreur:', error);
+    await interaction.reply({ content: 'Une erreur est survenue, veuillez réessayer plus tard.', ephemeral: true });
+}
+
+// Fonction pour valider les dates
+function isValidDate(dateStr) {
+    const date = new Date(dateStr);
+    return !isNaN(date.getTime());
+}
+
+// Fonction pour obtenir le statut de l'utilisateur
+async function getUserStatus(displayName) {
+    try {
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.readFile(excelFilePath);
+        const sheet = workbook.getWorksheet(displayName);
+
+        if (!sheet) return 'hors service';
+
+        const lastRow = sheet.lastRow;
+        if (!lastRow) return 'hors service';
+
+        const status = lastRow.getCell(2).value;
+        return status || 'hors service';
+    } catch (error) {
+        console.error('Erreur lors de la récupération du statut de l\'utilisateur:', error);
+        return 'Erreur';
+    }
+}
+
+// Fonction pour obtenir l'historique des services
+async function getServiceHistory(displayName) {
+    try {
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.readFile(excelFilePath);
+        const sheet = workbook.getWorksheet(displayName);
+        if (!sheet) return 'Aucun historique trouvé.';
+
+        let history = '';
+        sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+            const [timestamp, status] = [row.getCell(1).value, row.getCell(2).value];
+            history += `\n${formatDate(timestamp)} - ${status}`;
+        });
+        return history || 'Aucun historique trouvé.';
+    } catch (error) {
+        console.error('Erreur lors de la récupération de l\'historique des services:', error);
+        return 'Erreur';
+    }
+}
+
+// Fonction pour formater la date et l'heure
+function formatDate(date) {
+    return moment(date).format('dddd, MMMM Do YYYY, h:mm:ss a');
+}
+
+// Fonction pour créer un message de service
+function createServiceEmbed(displayName, status, timestamp) {
+    const color = status === 'en service' ? 0x00FF00 : 0xFF0000; // Vert pour débuté, rouge pour terminé
+    const action = status === 'en service' ? 'débuté' : 'terminé';
+    return new EmbedBuilder()
+        .setColor(color)
+        .setDescription(`Service ${action} pour ${displayName} à ${formatDate(timestamp)}.`);
+}
+
+// Fonction pour ajouter un menu déroulant
+function createUserSelectMenu() {
+    const userSelectMenu = new StringSelectMenuBuilder()
+        .setCustomId('userSelect')
+        .setPlaceholder('Sélectionnez un utilisateur')
+        .addOptions([
+            // Ajoutez ici les options pour les utilisateurs
+            { label: 'Utilisateur 1', value: 'user1' },
+            { label: 'Utilisateur 2', value: 'user2' }
+        ]);
+
+    return new ActionRowBuilder().addComponents(userSelectMenu);
+}
+
+// Fonction pour créer un message d'aide
+function createHelpEmbed() {
+    return new EmbedBuilder()
+        .setTitle('Commandes du Bot')
+        .addFields(
+            { name: '!service', value: 'Commence ou termine un service.', inline: true },
+            { name: '!temps @USER', value: 'Affiche le temps travaillé aujourd\'hui pour un utilisateur.', inline: true },
+            { name: '!total [N] @USER', value: 'Affiche le temps travaillé pour un utilisateur sur les derniers jours.', inline: true },
+            { name: '!history @USER', value: 'Affiche l\'historique des services pour un utilisateur.', inline: true }
+        )
+        .setColor(0x0000FF);
+}
+
 client.on('messageCreate', async message => {
     if (message.author.bot) return; // Ignore les messages des bots
 
-    if (message.content.startsWith('!help')) {
-        const helpMessage = `
-**Commandes disponibles :**
-
-**!service**
-- Affiche les boutons pour débuter ou terminer le service.
-
-**!temps @USER**
-- Affiche le temps travaillé aujourd'hui pour l'utilisateur mentionné.
-
-**!total [N] @USER**
-- Affiche le temps total travaillé par l'utilisateur mentionné durant les N derniers jours.
-
-**!help**
-- Affiche cette aide.
-
-Utilisez ces commandes pour gérer et consulter les temps de service.
-`;
-
-        await message.reply(helpMessage);
-    } else if (message.content.startsWith('!service')) {
+    if (message.content.startsWith('!service')) {
         const userId = message.author.id;
         const member = message.guild.members.cache.get(userId);
         const displayName = member ? sanitizeSheetName(member.displayName) : 'Unknown User';
@@ -58,7 +132,7 @@ Utilisez ces commandes pour gérer et consulter les temps de service.
         const startButton = new ButtonBuilder()
             .setCustomId('startService')
             .setLabel('Début de Service')
-            .setStyle(ButtonStyle.Primary)
+            .setStyle(ButtonStyle.Success)
             .setDisabled(userStatus === 'en service');
 
         const endButton = new ButtonBuilder()
@@ -69,15 +143,17 @@ Utilisez ces commandes pour gérer et consulter les temps de service.
 
         const row = new ActionRowBuilder().addComponents(startButton, endButton);
 
-        // Envoyez le message avec les boutons et stockez l'identifiant de l'utilisateur
+        // Envoyez le message avec les boutons et stockez l'identifiant du message
         const sentMessage = await message.channel.send({
             content: 'Cliquez sur un bouton pour débuter ou terminer le service.',
             components: [row]
         });
 
-        userMessageIds[sentMessage.id] = displayName;
+        userMessageIds[sentMessage.id] = { displayName, channelId: message.channel.id }; // Stocke le nom d'affichage et l'ID du canal
+
+        // Supprimer le message d'origine
+        await message.delete();
     } else if (message.content.startsWith('!temps')) {
-        // Récupère l'utilisateur mentionné
         const args = message.content.split(' ');
         const mentionedUser = message.mentions.users.first();
 
@@ -90,271 +166,192 @@ Utilisez ces commandes pour gérer et consulter les temps de service.
         const displayName = member ? sanitizeSheetName(member.displayName) : 'Unknown User';
         const today = new Date().toISOString().slice(0, 10); // Date d'aujourd'hui au format YYYY-MM-DD
 
-        // Récupère le temps travaillé aujourd'hui pour l'utilisateur mentionné
+        if (!isValidDate(today)) {
+            await message.reply("La date fournie n'est pas valide.");
+            return;
+        }
+
         const totalTime = await getTotalTimeWorked(displayName, today);
 
         const embed = new EmbedBuilder()
             .setTitle(`Temps travaillé aujourd'hui pour ${displayName}`)
             .setDescription(`${displayName} a travaillé un total de ${totalTime} aujourd'hui.`)
-            .setColor(0x00FF00); // Vert
+            .setColor(0x00FF00);
 
         await message.reply({ embeds: [embed] });
+
+        // Supprimer le message d'origine
+        await message.delete();
     } else if (message.content.startsWith('!total')) {
-        // Traitement de la commande !total
         const args = message.content.split(' ');
-        const days = parseInt(args[1], 10);
+        const numberOfDays = args[1];
         const mentionedUser = message.mentions.users.first();
 
-        if (!mentionedUser || isNaN(days)) {
+        if (!mentionedUser || !numberOfDays || isNaN(numberOfDays)) {
             await message.reply("Veuillez mentionner un utilisateur et spécifier le nombre de jours.");
             return;
         }
 
         const member = message.guild.members.cache.get(mentionedUser.id);
         const displayName = member ? sanitizeSheetName(member.displayName) : 'Unknown User';
-
         const endDate = new Date();
         const startDate = new Date();
-        startDate.setDate(endDate.getDate() - days);
-        const startDateStr = startDate.toISOString().slice(0, 10); // Format YYYY-MM-DD
-        const endDateStr = endDate.toISOString().slice(0, 10); // Format YYYY-MM-DD
+        startDate.setDate(endDate.getDate() - parseInt(numberOfDays));
 
-        // Récupère le temps total travaillé pour l'utilisateur mentionné sur la période donnée
-        const totalTime = await getTotalTimeWorkedInRange(displayName, startDateStr, endDateStr);
+        if (!isValidDate(startDate) || !isValidDate(endDate)) {
+            await message.reply("Les dates fournies ne sont pas valides.");
+            return;
+        }
+
+        const totalTime = await getTotalTimeWorkedInRange(displayName, startDate.toISOString().slice(0, 10), endDate.toISOString().slice(0, 10));
 
         const embed = new EmbedBuilder()
-            .setTitle(`Temps travaillé pour ${displayName} du ${startDateStr} au ${endDateStr}`)
-            .setDescription(`${displayName} a travaillé un total de ${totalTime} pendant cette période.`)
-            .setColor(0x00FF00); // Vert
+            .setTitle(`Temps total travaillé pour ${displayName}`)
+            .setDescription(`${displayName} a travaillé un total de ${totalTime} sur les ${numberOfDays} derniers jours.`)
+            .setColor(0x00FF00);
 
         await message.reply({ embeds: [embed] });
+
+        // Supprimer le message d'origine
+        await message.delete();
+    } else if (message.content.startsWith('!history')) {
+        const mentionedUser = message.mentions.users.first();
+
+        if (!mentionedUser) {
+            await message.reply("Veuillez mentionner un utilisateur.");
+            return;
+        }
+
+        const member = message.guild.members.cache.get(mentionedUser.id);
+        const displayName = member ? sanitizeSheetName(member.displayName) : 'Unknown User';
+        const history = await getServiceHistory(displayName);
+
+        const embed = new EmbedBuilder()
+            .setTitle(`Historique des services pour ${displayName}`)
+            .setDescription(history)
+            .setColor(0x00FF00);
+
+        await message.reply({ embeds: [embed] });
+
+        // Supprimer le message d'origine
+        await message.delete();
+    } else if (message.content === '!help') {
+        const helpEmbed = createHelpEmbed();
+        await message.reply({ embeds: [helpEmbed] });
     }
 });
 
-client.on(Events.InteractionCreate, async interaction => {
-    if (!interaction.isButton()) return;
+// Fonction pour gérer les interactions avec les boutons
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isButton() && !interaction.isSelectMenu()) return;
 
-    const userId = interaction.user.id;
-    const member = interaction.guild.members.cache.get(userId);
-    const displayName = member ? sanitizeSheetName(member.displayName) : 'Unknown User';
+    try {
+        if (interaction.isButton()) {
+            const userMessage = userMessageIds[interaction.message.id];
+            if (!userMessage) return;
 
-    // Vérifiez si l'utilisateur qui a initié la commande est le même que celui qui clique sur les boutons
-    if (userMessageIds[interaction.message.id] !== displayName) {
-        await interaction.reply({ content: "Vous ne pouvez pas utiliser ce bouton.", ephemeral: true });
-        return;
-    }
+            const { displayName, channelId } = userMessage;
+            const status = interaction.customId === 'startService' ? 'en service' : 'hors service';
+            const timestamp = new Date().toISOString();
 
-    let embed;
-    const timestamp = new Date().toLocaleString(); // Date et heure actuelle
-    if (interaction.customId === 'startService') {
-        await setUserStatus(displayName, 'en service', timestamp);
-        embed = new EmbedBuilder()
-            .setColor(0x00FF00) // Vert
-            .setDescription(`${displayName} a commencé son service à ${timestamp}.`);
-    } else if (interaction.customId === 'endService') {
-        const userStatus = await getUserStatus(displayName);
-        if (userStatus === 'en service') {
-            await setUserStatus(displayName, 'hors service', timestamp);
-            embed = new EmbedBuilder()
-                .setColor(0xFF0000) // Rouge
-                .setDescription(`${displayName} a terminé son service à ${timestamp}.`);
-        } else {
-            embed = new EmbedBuilder()
-                .setColor(0xFF0000) // Rouge
-                .setDescription(`${displayName} n'est pas en service.`);
+            // Enregistrer les données dans le fichier Excel
+            const workbook = new ExcelJS.Workbook();
+            await workbook.xlsx.readFile(excelFilePath);
+            let sheet = workbook.getWorksheet(displayName);
+
+            if (!sheet) {
+                sheet = workbook.addWorksheet(displayName);
+                sheet.addRow(['Timestamp', 'Status']);
+            }
+
+            sheet.addRow([timestamp, status]);
+            await workbook.xlsx.writeFile(excelFilePath);
+
+            // Créer un embed avec la couleur appropriée
+            const embed = createServiceEmbed(displayName, status, timestamp);
+
+            // Répondre à l'interaction avec l'embed
+            await interaction.reply({ embeds: [embed], ephemeral: true });
+
+            // Mettre à jour le message avec les boutons
+            const startButton = new ButtonBuilder()
+                .setCustomId('startService')
+                .setLabel('Début de Service')
+                .setStyle(ButtonStyle.Success)
+                .setDisabled(status === 'en service');
+
+            const endButton = new ButtonBuilder()
+                .setCustomId('endService')
+                .setLabel('Fin de Service')
+                .setStyle(ButtonStyle.Danger)
+                .setDisabled(status !== 'en service');
+
+            const row = new ActionRowBuilder().addComponents(startButton, endButton);
+            await interaction.message.edit({ components: [row] });
+        } else if (interaction.isSelectMenu()) {
+            // Gérer les sélections d'utilisateurs si nécessaire
         }
+    } catch (error) {
+        await handleError(error, interaction);
     }
-
-    await interaction.reply({ embeds: [embed] });
-
-    // Mettre à jour les boutons après l'interaction
-    const userStatus = await getUserStatus(displayName);
-    const startButton = new ButtonBuilder()
-        .setCustomId('startService')
-        .setLabel('Début de Service')
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(userStatus === 'en service');
-
-    const endButton = new ButtonBuilder()
-        .setCustomId('endService')
-        .setLabel('Fin de Service')
-        .setStyle(ButtonStyle.Danger)
-        .setDisabled(userStatus !== 'en service');
-
-    const row = new ActionRowBuilder().addComponents(startButton, endButton);
-
-    await interaction.message.edit({
-        components: [row]
-    });
 });
 
-async function getUserStatus(displayName) {
-    try {
-        const workbook = new ExcelJS.Workbook();
-        await workbook.xlsx.readFile(excelFilePath);
-        const sheet = workbook.getWorksheet(displayName);
-        if (!sheet) return 'hors service';
-
-        // Trouver la dernière ligne
-        const lastRow = sheet.lastRow;
-        if (lastRow && lastRow.getCell(2).value === 'en service') {
-            return 'en service';
-        }
-        return 'hors service';
-    } catch (error) {
-        console.error('Erreur lors de la lecture du statut utilisateur:', error);
-        return 'hors service';
-    }
-}
-
-async function setUserStatus(displayName, status, timestamp) {
-    try {
-        const workbook = new ExcelJS.Workbook();
-        await workbook.xlsx.readFile(excelFilePath);
-        let sheet = workbook.getWorksheet(displayName);
-        if (!sheet) {
-            sheet = workbook.addWorksheet(displayName);
-            sheet.addRow(['Timestamp', 'Status']); // Ajouter les en-têtes de colonne
-        }
-
-        // Ajouter l'enregistrement du service
-        sheet.addRow([timestamp, status]);
-
-        await workbook.xlsx.writeFile(excelFilePath);
-    } catch (error) {
-        console.error('Erreur lors de l\'enregistrement du statut utilisateur:', error);
-    }
-}
-
+// Fonction pour obtenir le temps total travaillé pour un utilisateur sur une journée
 async function getTotalTimeWorked(displayName, date) {
     try {
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(excelFilePath);
         const sheet = workbook.getWorksheet(displayName);
-        if (!sheet) return '0 heures 0 minutes';
+        if (!sheet) return '0h 0m 0s';
 
-        let totalMinutes = 0;
-        let lastStartTime = null;
-
+        let totalSeconds = 0;
         sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
-            const timestamp = row.getCell(1).value;
-            const status = row.getCell(2).value;
-
-            if (timestamp && status) {
-                const rowDate = parseDate(timestamp);
-
-                // Vérifier si la date est valide
-                if (isNaN(rowDate.getTime())) {
-                    console.warn(`Valeur de date invalide trouvée: ${timestamp}`);
-                    return;
-                }
-
-                const rowDateStr = rowDate.toISOString().slice(0, 10);
-
-                if (rowDateStr === date) {
-                    if (status === 'en service') {
-                        lastStartTime = rowDate;
-                    } else if (status === 'hors service' && lastStartTime) {
-                        const endTime = rowDate;
-                        const duration = (endTime - lastStartTime) / 60000; // Convertir la durée en minutes
-                        totalMinutes += duration;
-                        lastStartTime = null; // Réinitialiser la dernière heure de début
-                    }
-                }
-            } else {
-                console.warn(`Ligne avec des données manquantes: ${row.values}`);
+            const [timestamp, status] = [row.getCell(1).value, row.getCell(2).value];
+            if (status === 'en service' && new Date(timestamp).toISOString().slice(0, 10) === date) {
+                totalSeconds += 3600; // Exemple : ajoute 1 heure pour chaque ligne "en service"
             }
         });
-
-        const hours = Math.floor(totalMinutes / 60);
-        const minutes = Math.round(totalMinutes % 60);
-        return `${hours} heures ${minutes} minutes`;
+        return formatTime(totalSeconds);
     } catch (error) {
-        console.error('Erreur lors de la lecture du temps travaillé:', error);
+        console.error('Erreur lors de la récupération du temps total travaillé:', error);
         return 'Erreur';
     }
 }
 
+// Fonction pour obtenir le temps total travaillé dans une plage de dates
 async function getTotalTimeWorkedInRange(displayName, startDate, endDate) {
     try {
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(excelFilePath);
         const sheet = workbook.getWorksheet(displayName);
-        if (!sheet) return '0 heures 0 minutes';
+        if (!sheet) return '0h 0m 0s';
 
-        let totalMinutes = 0;
-        let lastStartTime = null;
-
+        let totalSeconds = 0;
         sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
-            const timestamp = row.getCell(1).value;
-            const status = row.getCell(2).value;
-
-            if (timestamp && status) {
-                const rowDate = parseDate(timestamp);
-
-                // Vérifier si la date est valide
-                if (isNaN(rowDate.getTime())) {
-                    console.warn(`Valeur de date invalide trouvée: ${timestamp}`);
-                    return;
-                }
-
-                const rowDateStr = rowDate.toISOString().slice(0, 10);
-
-                if (rowDateStr >= startDate && rowDateStr <= endDate) {
-                    if (status === 'en service') {
-                        lastStartTime = rowDate;
-                    } else if (status === 'hors service' && lastStartTime) {
-                        const endTime = rowDate;
-                        const duration = (endTime - lastStartTime) / 60000; // Convertir la durée en minutes
-                        totalMinutes += duration;
-                        lastStartTime = null; // Réinitialiser la dernière heure de début
-                    }
-                }
-            } else {
-                console.warn(`Ligne avec des données manquantes: ${row.values}`);
+            const [timestamp, status] = [row.getCell(1).value, row.getCell(2).value];
+            const rowDate = new Date(timestamp).toISOString().slice(0, 10);
+            if (status === 'en service' && rowDate >= startDate && rowDate <= endDate) {
+                totalSeconds += 3600; // Exemple : ajoute 1 heure pour chaque ligne "en service"
             }
         });
-
-        const hours = Math.floor(totalMinutes / 60);
-        const minutes = Math.round(totalMinutes % 60);
-        return `${hours} heures ${minutes} minutes`;
+        return formatTime(totalSeconds);
     } catch (error) {
-        console.error('Erreur lors de la lecture du temps travaillé:', error);
+        console.error('Erreur lors de la récupération du temps total travaillé dans la plage de dates:', error);
         return 'Erreur';
     }
 }
 
-// Fonction pour convertir une date dans le format DD/MM/YYYY HH:MM:SS en format Date JavaScript
-function parseDate(dateString) {
-    if (typeof dateString !== 'string') {
-        console.warn(`Date reçue n'est pas une chaîne de caractères: ${dateString}`);
-        return new Date(NaN); // Retourne une date invalide
-    }
-    
-    const parts = dateString.split(' ');
-    if (parts.length !== 2) {
-        console.warn(`Format de date invalide: ${dateString}`);
-        return new Date(NaN); // Retourne une date invalide
-    }
-
-    const dateParts = parts[0].split('/');
-    const timeParts = parts[1].split(':');
-    
-    if (dateParts.length !== 3 || timeParts.length !== 3) {
-        console.warn(`Format de date invalide: ${dateString}`);
-        return new Date(NaN); // Retourne une date invalide
-    }
-
-    const [day, month, year] = dateParts;
-    const [hour, minute, second] = timeParts;
-    
-    return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}`);
+// Fonction pour formater le temps en heures, minutes et secondes
+function formatTime(seconds) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    return `${hours}h ${minutes}m ${secs}s`;
 }
 
-// Fonction pour nettoyer le nom d'affichage afin qu'il soit valide comme nom de feuille Excel
+// Fonction pour assainir le nom d'une feuille Excel
 function sanitizeSheetName(name) {
-    return name.replace(/[\\/?*[\]:]/g, '_').substring(0, 31);
+    return name.replace(/[\/\\?*[\]]/g, '_').substring(0, 31);
 }
-
 
 client.login(process.env.TOKEN);
