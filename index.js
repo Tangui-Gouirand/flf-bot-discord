@@ -154,7 +154,6 @@ client.on('messageCreate', async message => {
         // Supprimer le message d'origine
         await message.delete();
     } else if (message.content.startsWith('!temps')) {
-        const args = message.content.split(' ');
         const mentionedUser = message.mentions.users.first();
 
         if (!mentionedUser) {
