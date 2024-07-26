@@ -305,12 +305,20 @@ async function getTotalTimeWorked(displayName, date) {
         if (!sheet) return '0h 0m 0s';
 
         let totalSeconds = 0;
+        let lastStartTime = null;
+
         sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
             const [timestamp, status] = [row.getCell(1).value, row.getCell(2).value];
-            if (status === 'en service' && new Date(timestamp).toISOString().slice(0, 10) === date) {
-                totalSeconds += 3600; // Exemple : ajoute 1 heure pour chaque ligne "en service"
+            if (new Date(timestamp).toISOString().slice(0, 10) === date) {
+                if (status === 'en service') {
+                    lastStartTime = new Date(timestamp);
+                } else if (status === 'hors service' && lastStartTime) {
+                    totalSeconds += (new Date(timestamp) - lastStartTime) / 1000;
+                    lastStartTime = null;
+                }
             }
         });
+
         return formatTime(totalSeconds);
     } catch (error) {
         console.error('Erreur lors de la récupération du temps total travaillé:', error);
@@ -327,13 +335,21 @@ async function getTotalTimeWorkedInRange(displayName, startDate, endDate) {
         if (!sheet) return '0h 0m 0s';
 
         let totalSeconds = 0;
+        let lastStartTime = null;
+
         sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
             const [timestamp, status] = [row.getCell(1).value, row.getCell(2).value];
             const rowDate = new Date(timestamp).toISOString().slice(0, 10);
-            if (status === 'en service' && rowDate >= startDate && rowDate <= endDate) {
-                totalSeconds += 3600; // Exemple : ajoute 1 heure pour chaque ligne "en service"
+            if (rowDate >= startDate && rowDate <= endDate) {
+                if (status === 'en service') {
+                    lastStartTime = new Date(timestamp);
+                } else if (status === 'hors service' && lastStartTime) {
+                    totalSeconds += (new Date(timestamp) - lastStartTime) / 1000;
+                    lastStartTime = null;
+                }
             }
         });
+
         return formatTime(totalSeconds);
     } catch (error) {
         console.error('Erreur lors de la récupération du temps total travaillé dans la plage de dates:', error);
@@ -355,3 +371,7 @@ function sanitizeSheetName(name) {
 }
 
 client.login(process.env.TOKEN);
+
+}
+
+
