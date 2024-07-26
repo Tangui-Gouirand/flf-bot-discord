@@ -70,7 +70,7 @@ async function getServiceHistory(displayName) {
         let history = '';
         sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
             const [timestamp, status] = [row.getCell(1).value, row.getCell(2).value];
-            history += `\n${formatDate(timestamp)} - ${status}`;
+            history += `\n${formatDate(new Date(timestamp))} - ${status}`;
         });
         return history || 'Aucun historique trouvé.';
     } catch (error) {
@@ -252,7 +252,7 @@ client.on('interactionCreate', async interaction => {
 
             const { displayName, channelId } = userMessage;
             const status = interaction.customId === 'startService' ? 'en service' : 'hors service';
-            const timestamp = new Date().toISOString();
+            const timestamp = new Date();
 
             // Enregistrer les données dans le fichier Excel
             const workbook = new ExcelJS.Workbook();
@@ -264,7 +264,7 @@ client.on('interactionCreate', async interaction => {
                 sheet.addRow(['Timestamp', 'Status']);
             }
 
-            sheet.addRow([timestamp, status]);
+            sheet.addRow([timestamp.toISOString(), status]);
             await workbook.xlsx.writeFile(excelFilePath);
 
             // Créer un embed avec la couleur appropriée
