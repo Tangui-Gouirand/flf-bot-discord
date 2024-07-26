@@ -11,6 +11,7 @@ const userMessageIds = {}; // Pour stocker les messages avec les boutons
 // Fonction pour créer un fichier Excel vide s'il n'existe pas
 async function createExcelFileIfNotExists() {
     try {
+        console.log(`Vérification de l'existence du fichier à l'emplacement : ${excelFilePath}`);
         if (!fs.existsSync(excelFilePath)) {
             console.log(`Le fichier Excel n'existe pas. Création de ${excelFilePath}`);
             const workbook = new ExcelJS.Workbook();
@@ -38,12 +39,19 @@ async function getUserStatus(displayName) {
         await workbook.xlsx.readFile(excelFilePath);
         const sheet = workbook.getWorksheet(displayName);
 
-        if (!sheet) return 'hors service';
+        if (!sheet) {
+            console.log(`Aucune feuille trouvée pour ${displayName}`);
+            return 'hors service';
+        }
 
         const lastRow = sheet.lastRow;
-        if (!lastRow) return 'hors service';
+        if (!lastRow) {
+            console.log(`Aucune ligne trouvée pour ${displayName}`);
+            return 'hors service';
+        }
 
         const status = lastRow.getCell(2).value;
+        console.log(`Statut trouvé pour ${displayName} : ${status}`);
         return status || 'hors service';
     } catch (error) {
         console.error('Erreur lors de la récupération du statut de l\'utilisateur:', error);
@@ -58,13 +66,17 @@ async function getServiceHistory(displayName) {
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.readFile(excelFilePath);
         const sheet = workbook.getWorksheet(displayName);
-        if (!sheet) return 'Aucun historique trouvé.';
+        if (!sheet) {
+            console.log(`Aucune feuille trouvée pour ${displayName}`);
+            return 'Aucun historique trouvé.';
+        }
 
         let history = '';
         sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
             const [timestamp, status] = [row.getCell(1).value, row.getCell(2).value];
             history += `\n${formatDate(new Date(timestamp))} - ${status}`;
         });
+        console.log(`Historique trouvé pour ${displayName}: ${history}`);
         return history || 'Aucun historique trouvé.';
     } catch (error) {
         console.error('Erreur lors de la récupération de l\'historique des services:', error);
@@ -176,30 +188,37 @@ client.on('messageCreate', async message => {
         await message.delete();
     } else if (message.content.startsWith('!total')) {
         const args = message.content.split(' ');
-        const numberOfDays = args[1];
+        const numberOfDays = parseInt(args[1], 10);
         const mentionedUser = message.mentions.users.first();
 
-        if (!mentionedUser || !numberOfDays || isNaN(numberOfDays)) {
-            await message.reply("Veuillez mentionner un utilisateur et spécifier le nombre de jours.");
+        if (!mentionedUser) {
+            await message.reply("Veuillez mentionner un utilisateur.");
+            return;
+        }
+
+        if (isNaN(numberOfDays)) {
+            await message.reply("Veuillez entrer un nombre valide de jours.");
             return;
         }
 
         const member = message.guild.members.cache.get(mentionedUser.id);
         const displayName = member ? sanitizeSheetName(member.displayName) : 'Unknown User';
         const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(endDate.getDate() - parseInt(numberOfDays));
+        const startDate = new Date(endDate);
+        startDate.setDate(startDate.getDate() - numberOfDays);
+        const formattedStartDate = startDate.toISOString().slice(0, 10);
+        const formattedEndDate = endDate.toISOString().slice(0, 10);
 
-        if (!isValidDate(startDate) || !isValidDate(endDate)) {
+        if (!isValidDate(formattedStartDate) || !isValidDate(formattedEndDate)) {
             await message.reply("Les dates fournies ne sont pas valides.");
             return;
         }
 
-        const totalTime = await getTotalTimeWorkedInRange(displayName, startDate.toISOString().slice(0, 10), endDate.toISOString().slice(0, 10));
+        const totalTime = await getTotalTimeWorkedInRange(displayName, formattedStartDate, formattedEndDate);
 
         const embed = new EmbedBuilder()
             .setTitle(`Temps travaillé pour ${displayName}`)
-            .setDescription(`${displayName} a travaillé un total de ${totalTime} durant les ${numberOfDays} derniers jours.`)
+            .setDescription(`${displayName} a travaillé un total de ${totalTime} sur les ${numberOfDays} derniers jours.`)
             .setColor(0x00FF00);
 
         await message.reply({ embeds: [embed] });
@@ -233,7 +252,6 @@ client.on('messageCreate', async message => {
     }
 });
 
-// Fonction pour gérer les interactions avec les boutons
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton() && !interaction.isSelectMenu()) return;
 
