@@ -20,7 +20,6 @@ async function createExcelFileIfNotExists() {
         console.error('Erreur lors de la création du fichier Excel:', error);
     }
 }
-
 // Assurez-vous que le fichier Excel existe lorsque le bot démarre
 client.once('ready', async () => {
     await createExcelFileIfNotExists();
