@@ -309,11 +309,14 @@ async function getTotalTimeWorked(displayName, date) {
 
         sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
             const [timestamp, status] = [row.getCell(1).value, row.getCell(2).value];
-            if (new Date(timestamp).toISOString().slice(0, 10) === date) {
+            const rowDate = new Date(timestamp).toISOString().slice(0, 10);
+
+            if (rowDate === date) {
                 if (status === 'en service') {
                     lastStartTime = new Date(timestamp);
                 } else if (status === 'hors service' && lastStartTime) {
-                    totalSeconds += (new Date(timestamp) - lastStartTime) / 1000;
+                    const endTime = new Date(timestamp);
+                    totalSeconds += (endTime - lastStartTime) / 1000;
                     lastStartTime = null;
                 }
             }
@@ -340,11 +343,13 @@ async function getTotalTimeWorkedInRange(displayName, startDate, endDate) {
         sheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
             const [timestamp, status] = [row.getCell(1).value, row.getCell(2).value];
             const rowDate = new Date(timestamp).toISOString().slice(0, 10);
+
             if (rowDate >= startDate && rowDate <= endDate) {
                 if (status === 'en service') {
                     lastStartTime = new Date(timestamp);
                 } else if (status === 'hors service' && lastStartTime) {
-                    totalSeconds += (new Date(timestamp) - lastStartTime) / 1000;
+                    const endTime = new Date(timestamp);
+                    totalSeconds += (endTime - lastStartTime) / 1000;
                     lastStartTime = null;
                 }
             }
@@ -372,6 +377,5 @@ function sanitizeSheetName(name) {
 
 client.login(process.env.TOKEN);
 
-}
 
 
